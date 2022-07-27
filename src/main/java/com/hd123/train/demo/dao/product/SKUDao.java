@@ -1,6 +1,7 @@
 package com.hd123.train.demo.dao.product;
 
 import com.hd123.rumba.commons.biz.query.QueryResult;
+import com.hd123.rumba.commons.jdbc.executor.BatchUpdater;
 import com.hd123.rumba.commons.jdbc.executor.JdbcPagingQueryExecutor;
 import com.hd123.rumba.commons.jdbc.sql.DeleteBuilder;
 import com.hd123.rumba.commons.jdbc.sql.DeleteStatement;
@@ -21,10 +22,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.math.BigDecimal;
 import java.util.List;
+import java.util.Map;
 
 @Repository
 public class SKUDao {
+
   @Autowired
   private JdbcTemplate jdbcTemplate;
 
@@ -33,7 +37,6 @@ public class SKUDao {
             .select(PSKU.COLUMNS).from(PSKU.TABLE_NAME)
             .where(Predicates.equals(PSKU.ID, id))
             .build();
-
     List<SKU> list = jdbcTemplate.query(select, PSKU::mapRow);
     if (list.isEmpty())
       return null;
@@ -50,6 +53,9 @@ public class SKUDao {
             .where(Predicates.equals(PSKUProperty.SKU_UUID, target.getUuid()))
             .build();
     target.setProperties(jdbcTemplate.query(select, PSKUProperty::mapRow));
+
+//    System.out.println(target.getId());
+
     return target;
   }
 
@@ -82,6 +88,8 @@ public class SKUDao {
             .where(Predicates.equals(PSKUDescription.SKU_UUID, sku.getUuid()))
             .build();
     jdbcTemplate.update(delete);
+
+
     for (SKUDescription description : sku.getDescriptions()) {
       description.setSkuUuid(sku.getUuid());
       InsertStatement insert = new InsertBuilder()
@@ -109,7 +117,7 @@ public class SKUDao {
     SelectStatement select = new SelectBuilder()
             .select(PSKU.COLUMNS).from(PSKU.TABLE_NAME)
             .build();
-    if (StringUtils.isBlank(filter.getSpuidEq()) == false) {
+    if (!StringUtils.isBlank(filter.getSpuidEq())) {
       select.where(Predicates.equals(PSKU.SPUID, filter.getSpuidEq()));
     }
     if (StringUtils.isBlank(filter.getIdNameLike()) == false) {
@@ -127,4 +135,28 @@ public class SKUDao {
     JdbcPagingQueryExecutor executor = new JdbcPagingQueryExecutor(jdbcTemplate, PSKU::mapRow);
     return executor.query(select, filter.getPage(), filter.getPageSize());
   }
+
+  /**
+   * 批量更新  商品 库存
+   * @param skuMap
+   * @return
+   */
+  public boolean batchUpdateSkuStock(Map<String, BigDecimal> skuMap) {
+
+    BatchUpdater batchUpdater = new BatchUpdater(jdbcTemplate);
+
+    for (Map.Entry<String, BigDecimal> sku: skuMap.entrySet() ) {
+      UpdateStatement skuUpdate = new UpdateBuilder()
+          .table(PSKU.TABLE_NAME)
+          .setValue(PSKU.STOCK_QTY,sku.getValue())
+          .where(Predicates.equals(PSKU.ID,sku.getKey()))
+          .build();
+      batchUpdater.add(skuUpdate);
+    }
+    batchUpdater.update();  // 执行
+
+    return true;
+  }
+
+
 }

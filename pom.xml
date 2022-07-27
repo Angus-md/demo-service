@@ -26,7 +26,7 @@
     <commons-lang3.version>3.5</commons-lang3.version>
     <java.version>1.8</java.version>
     <junit.version>4.12</junit.version>
-    <rumba-commons-jdbc.version>2.0.0</rumba-commons-jdbc.version>
+    <rumba-commons-jdbc.version>2.7.2</rumba-commons-jdbc.version>
     <swagger.version>2.9.2</swagger.version>
     <spring-boot.version>2.1.5.RELEASE</spring-boot.version>
   </properties>
@@ -69,11 +69,25 @@
       <scope>test</scope>
     </dependency>
 
+    <dependency>
+      <groupId>io.swagger</groupId>
+      <artifactId>swagger-annotations</artifactId>
+      <version>1.5.22</version>
+    </dependency>
+    <dependency>
+      <groupId>io.swagger</groupId>
+      <artifactId>swagger-models</artifactId>
+      <version>1.5.22</version>
+    </dependency>
+
+
     <!-- 数据存储 -->
     <dependency>
       <groupId>mysql</groupId>
       <artifactId>mysql-connector-java</artifactId>
+      <version>5.1.41</version>
     </dependency>
+
     <dependency>
       <groupId>com.alibaba</groupId>
       <artifactId>druid-spring-boot-starter</artifactId>
@@ -81,8 +95,35 @@
     </dependency>
 
     <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-jdbc</artifactId>
+    </dependency>
+
+
+
+<!--    2.7.2-->
+    <dependency>
       <groupId>com.hd123.rumba.commons</groupId>
       <artifactId>rumba-commons-jdbc</artifactId>
+      <version>2.7.2</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.hd123.rumba.commons</groupId>
+      <artifactId>rumba-commons-mini</artifactId>
+      <version>2.11.0</version>
+    </dependency>
+
+    <dependency>
+      <groupId>com.hd123.rumba.commons</groupId>
+      <artifactId>rumba-commons-biz</artifactId>
+      <version>2.3.0</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.apache.commons</groupId>
+      <artifactId>commons-collections4</artifactId>
+      <version>4.3</version>
     </dependency>
 
     <!-- 模型验证 -->
@@ -125,6 +166,14 @@
       <plugin>
         <groupId>pl.project13.maven</groupId>
         <artifactId>git-commit-id-plugin</artifactId>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <configuration>
+          <testFailureIgnore>true</testFailureIgnore>
+        </configuration>
       </plugin>
 
       <plugin>
