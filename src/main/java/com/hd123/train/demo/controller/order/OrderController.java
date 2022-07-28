@@ -70,10 +70,8 @@ public class OrderController {
       return BaseResponse.fail(503,"订单号存在");
     }
     //执行新建
-    if (!orderDao.saveOrder(order)){
-      return BaseResponse.fail(503,"新增失败");
-    }
-    return BaseResponse.success();
+
+    return orderDao.saveOrder(order);
   }
 
   /**
@@ -91,11 +89,12 @@ public class OrderController {
       return BaseResponse.fail(503,"订单号错误或不存在！");
     }
 
+    if (!Order.STATE.submited.toString().equals(order.getState()))
+      return BaseResponse.fail(503,"订单未提交！");
+
     //是否修改成功
-    if (!orderDao.saveOrder(order)){
-      return BaseResponse.fail(503,"更新失败");
-    }
-    return BaseResponse.success();
+
+    return  orderDao.saveOrder(order);
   }
 
 
@@ -110,14 +109,11 @@ public class OrderController {
     }
 
 //    订单状态必须已提交
-    if (!"submited".equals(order.getState())){
+    if (!Order.STATE.submited.toString().equals(order.getState())){
       return BaseResponse.fail(503,"订单未提交！");
     }
 
-    if (!orderDao.checkOrder(order)){
-      return BaseResponse.fail(503,"审核失效！");
-    }
-    return BaseResponse.success();
+    return  orderDao.checkOrder(order);
   }
 
   /**
@@ -136,14 +132,11 @@ public class OrderController {
     }
 
 //    订单状态必须已审核
-    if (!"audited".equals(order.getState())){
-      return BaseResponse.fail(503,"订单未提交！");
+      if (!Order.STATE.audited.toString().equals(order.getState())){
+      return BaseResponse.fail(503,"订单未审核！");
     }
 
-    if(!orderDao.invalidOrder(order))
-      return BaseResponse.fail(503,"作废失败！");
-
-    return BaseResponse.success();
+    return orderDao.invalidOrder(order);
   }
 
   @ApiOperation(value = "分页查询")

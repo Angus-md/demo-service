@@ -22,6 +22,7 @@ import com.hd123.train.demo.controller.product.SKU;
 import com.hd123.train.demo.dao.order.OrderDao;
 import com.hd123.train.demo.dao.order.POrder;
 import com.hd123.train.demo.dao.product.PSKU;
+import com.hd123.train.demo.dao.product.SKUDao;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -51,6 +52,9 @@ public class OrderTest {
 
   @Autowired
   private OrderDao orderDao;
+
+  @Autowired
+  private SKUDao skuDao;
 
   @Test
   public void Test1(){
@@ -158,8 +162,21 @@ public class OrderTest {
     }
     batchUpdater.update();  // 执行
 
+  }
+
+  @Test
+  public void test7() {
+
+
+    List<String> list = new ArrayList<>();
+    list.add("0011");
+    list.add("0022");
+
+
+    List<SKU> skus = skuDao.querySkusById(list);
+
+    skus.forEach(System.out::println);
 
 
   }
-
 }

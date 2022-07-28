@@ -20,8 +20,11 @@ import com.hd123.rumba.commons.jdbc.sql.SelectBuilder;
 import com.hd123.rumba.commons.jdbc.sql.SelectStatement;
 import com.hd123.rumba.commons.jdbc.sql.UpdateBuilder;
 import com.hd123.train.demo.controller.order.Order;
+import com.hd123.train.demo.controller.order.OrderFilter;
 import com.hd123.train.demo.controller.order.OrderLine;
+import com.hd123.train.demo.controller.product.SKU;
 import com.hd123.train.demo.dao.product.SKUDao;
+import com.hd123.train.demo.infrastructure.biz.BaseResponse;
 import org.apache.commons.lang3.EnumUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +33,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,15 +52,10 @@ public class OrderDao {
   @Autowired
   private SKUDao skuDao;
 
-
-  public  enum deliverTypeRequire {
-    selfPick,courier
-  }
-
   /**
    * 根据 id 获取订单
    * @param uuid
-   * @return
+   * @return order
    */
   public Order getOrderByUuid(String uuid){
 
@@ -113,104 +112,109 @@ public class OrderDao {
     return order;
   }
 
-
-
   /**
    * 自动产生订单号，需要判断商品剩余库存是否足够。保存后的订单状态是已提交
    * @param order
    */
-  public boolean saveOrder(Order order) {
+  public BaseResponse saveOrder(Order order) {
 
-//    如果是修改则判断状态是否是已经提交
-    if(isNotEmptyByBillNumber(order.getBillNumber()))
-      if (!"submited".equals(order.getState()))
-        return false;
-//    订单的运送方式是否规范
-      if (!EnumUtils.isValidEnum(deliverTypeRequire.class, order.getDeliverType()))
-        return false;
+      // 判断运送方式是否规范
+      if (!EnumUtils.isValidEnum(Order.DELIVERTYPE.class, order.getDeliverType())){
+        return BaseResponse.fail(503,"订单运送方式错误或未填写！");
+      }
 
-    // 1、获取 订单对象里 每个订单详细对象
+    // 判断需求的订单是否 合法
     List<OrderLine> descriptions = order.getDescriptions();
-
-//    所需要的商品 id 和  数量
     for (OrderLine orderLine: descriptions) {
-//    校验需求商品的id是否为空
-      if (StringUtils.isBlank(orderLine.getSkuId()) || orderLine.getQty() == null)
-        return false;
-//    需求商品库存是否存在   商品库存是否为空
-      if (skuDao.get(orderLine.getSkuId()) == null || skuDao.get(orderLine.getSkuId()).getStockQty() == null )
-        return false;
-//      判断库存是否足够
-      if (orderLine.getQty().compareTo(skuDao.get(orderLine.getSkuId()).getStockQty()) > 0){
-        return false;
+      //校验需求商品的id是否为空
+      if (StringUtils.isBlank(orderLine.getSkuId()) || orderLine.getQty() == null){
+        return BaseResponse.fail(503,"商品ID错误或未填写！");
+      }
+    }
+//    获取 库存商品信息
+    Map<String,BigDecimal> skuIdQty =  skuStockMap(descriptions);
+
+    //进入判断
+    for (OrderLine orderLine: descriptions) {
+      //需求商品库存是否存在   商品库存是否为空
+      if (!skuIdQty.containsKey(orderLine.getSkuId()) || skuIdQty.get(orderLine.getSkuId()) == null  ){
+        return BaseResponse.fail(503,"库存无该商品信息！");
+      }
+      System.out.println("orderLine.getSkuId()=" + orderLine.getSkuId()  + "  skuIdQty.containsKey(orderLine.getSkuId()) " + skuIdQty.containsKey(orderLine.getSkuId()));
+      // 判断库存是否足够
+      if (orderLine.getQty().compareTo(skuIdQty.get(orderLine.getSkuId())) > 0){
+        return BaseResponse.fail(503,"库存不足！");
       }
     }
 
-//  库存满足需求开始创建订单
-//  判断传入的参数  是空 则新增   非空则获取原有id更新
-    BatchUpdater batchUpdater = new BatchUpdater(jdbcTemplate);
-
-    if(isNotEmptyByBillNumber(order.getBillNumber())){
-      String orderId = getOrderByBillNumber(order.getBillNumber()).getUuid();
+  //  库存满足需求    开始创建订单
+  //  判断传入的参数  是空 则新增   非空则获取原有id更新
+    if(getOrderByBillNumber(order.getBillNumber()) != null){
 //      更新
+      String orderId = getOrderByBillNumber(order.getBillNumber()).getUuid();
+      order.setUuid(orderId);
       jdbcTemplate.update(new UpdateBuilder()
           .table(POrder.TABLE_NAME)
-          .setValue(POrder.UUID,orderId)
-          .setValue(POrder.BILLNUMBER,order.getBillNumber())
-          .setValue(POrder.ORDERTIME,order.getOrderTime())
-          .setValue(POrder.BUYER,order.getBuyer())
-          .setValue(POrder.STATE,order.getState())
-          .setValue(POrder.AMOUT,order.getAmount())
-          .setValue(POrder.DELIVERTYPE,order.getDeliverType())
-          .setValue(POrder.REMARK,order.getRemark())
-          .where(Predicates.equals(POrder.BILLNUMBER,order.getBillNumber()))
+          .setValues(POrder.toFieldValues(order))
           .build());
-
-      jdbcTemplate.update(new DeleteBuilder()
-          .table(POrderLine.TABLE_NAME)
-          .where(Predicates.equals(POrderLine.ORDERUUID,orderId))
-          .build());
-      //      更新订单详细
-      for (OrderLine orderLine: descriptions) {
-        orderLine.setOrderUuid(orderId);
-        InsertStatement insert = new InsertBuilder()
-            .table(POrderLine.TABLE_NAME)
-            .addValues(POrderLine.toFieldValues(orderLine))
-            .build();
-        batchUpdater.add(insert); // 添加语句
-      }
-
+      updateOrderLine(descriptions,orderId);
     }else {
 //      新增
-      Order target = new Order(
-          UUID.randomUUID().toString(),
-          order.getBillNumber(),
-          order.getOrderTime(),
-          order.getBuyer(),
-          "submited",
-          order.getAmount(),
-          order.getDeliverType(),
-          order.getRemark(),
-          order.getDescriptions());
+      order.setUuid(UUID.randomUUID().toString());
+      order.setState(Order.STATE.submited.toString());
 
       jdbcTemplate.update(new InsertBuilder()
           .table(POrder.TABLE_NAME)
-          .addValues(POrder.toFieldValues(target))
+          .addValues(POrder.toFieldValues(order))
           .build());
 
-//      增加订单详细
-      for (OrderLine orderLine: descriptions) {
-        orderLine.setOrderUuid(target.getUuid());
-        InsertStatement insert = new InsertBuilder()
-            .table(POrderLine.TABLE_NAME)
-            .addValues(POrderLine.toFieldValues(orderLine))
-            .build();
-        batchUpdater.add(insert); // 添加语句
-      }
+      updateOrderLine(descriptions,order.getUuid());
+    }
+
+    return BaseResponse.fail(200,"保存成功！");
+  }
+
+  private Map<String,BigDecimal> skuStockMap(List<OrderLine> descriptions) {
+    List<String> skuIds = new ArrayList<>();
+    for (OrderLine orderLine: descriptions) {
+      skuIds.add(orderLine.getSkuId());
+    }
+
+    //存放库存map  id-qty
+    List<SKU> skus = skuDao.querySkusById(skuIds);
+    Map<String,BigDecimal> skuIdQty = new  HashMap<>();
+    for (SKU sku:skus) {
+      skuIdQty.put(sku.getId(),sku.getStockQty());
+    }
+    return  skuIdQty;
+  }
+
+  /**
+   * 更新订单详细
+   * @param orderLines
+   * @param orderId
+   */
+  public void updateOrderLine(List<OrderLine> orderLines,String orderId){
+
+    // 删除原有订单详细
+    jdbcTemplate.update(new DeleteBuilder()
+        .table(POrderLine.TABLE_NAME)
+        .where(Predicates.equals(POrderLine.ORDERUUID,orderId))
+        .build());
+
+    //批量插入订单详细订单详细
+    BatchUpdater batchUpdater = new BatchUpdater(jdbcTemplate);
+    for (OrderLine orderLine: orderLines) {
+      orderLine.setOrderUuid(orderId);
+      InsertStatement insert = new InsertBuilder()
+          .table(POrderLine.TABLE_NAME)
+          .addValues(POrderLine.toFieldValues(orderLine))
+          .build();
+      batchUpdater.add(insert); // 添加语句
     }
     batchUpdater.update();  // 执行
-    return true;
   }
+
 
 //  返回布尔类型
   public boolean isNotEmptyByBillNumber(String billNumber){
@@ -228,74 +232,83 @@ public class OrderDao {
    * @param order
    * @return
    */
-  public boolean checkOrder(Order order) {
+  public BaseResponse checkOrder(Order order) {
 
 //    订单的运送方式是否规范
-    if (!EnumUtils.isValidEnum(deliverTypeRequire.class, order.getDeliverType()))
-      return false;
+    if (!EnumUtils.isValidEnum(Order.DELIVERTYPE.class, order.getDeliverType()))
+      return BaseResponse.fail(503,"订单运送方式错误或未填写！");
 
     //获取所有订单详细对象列表
     List<OrderLine> descriptions = order.getDescriptions();
-    Map<String, BigDecimal> skuMap = new HashMap<>();
+    Map<String, BigDecimal> newSkuIdStockMap = new HashMap<>();
+
+    //    获取 库存商品信息
+    Map<String,BigDecimal> oldSkuIdStockMap =  skuStockMap(descriptions);
+
 
 //    所需要的商品 id 和  数量
     for (OrderLine orderLine: descriptions) {
 //    校验需求商品的id是否为空
       if (StringUtils.isBlank(orderLine.getSkuId()) || orderLine.getQty() == null)
-        return false;
+        return BaseResponse.fail(503,"商品信息错误或未填写！");
 //    需求商品库存是否存在   商品库存是否为空
-      if (skuDao.get(orderLine.getSkuId()) == null || skuDao.get(orderLine.getSkuId()).getStockQty() == null )
-        return false;
-      skuMap.put(skuDao.get(orderLine.getSkuId()).getId(),skuDao.get(orderLine.getSkuId()).getStockQty().subtract(orderLine.getQty()) );
+      if (!oldSkuIdStockMap.containsKey(orderLine.getSkuId())  ||  oldSkuIdStockMap.get(orderLine.getSkuId()) == null )
+        return BaseResponse.fail(503,"库存商品不足-----------！");
+      newSkuIdStockMap.put(skuDao.get(orderLine.getSkuId()).getId(),skuDao.get(orderLine.getSkuId()).getStockQty().subtract(orderLine.getQty()) );
     }
 
-    if(!skuDao.batchUpdateSkuStock(skuMap))
-      return false;
-
-    jdbcTemplate.update( new UpdateBuilder()
-        .table(POrder.TABLE_NAME)
-        .setValue(POrder.STATE, "audited")
-        .where(Predicates.equals(POrder.BILLNUMBER, order.getBillNumber()))
-        .build());
-
-    return true;
+//    批量更新库存
+    skuDao.batchUpdateSkuStock(newSkuIdStockMap);
+//    更新状态
+    orderStateUpdate(order.getBillNumber(),Order.STATE.audited);
+    return BaseResponse.fail(503,"审核成功！");
   }
 
   /**
    *订单作废
    * @return
    */
-  public boolean invalidOrder(Order order) {
+  public BaseResponse invalidOrder(Order order) {
 
 //    订单的运送方式是否规范
-    if (!EnumUtils.isValidEnum(deliverTypeRequire.class, order.getDeliverType()))
-      return false;
+    if (!EnumUtils.isValidEnum(Order.DELIVERTYPE.class, order.getDeliverType()))
+      return BaseResponse.fail(503,"订单运送方式错误或未填写！");
 
     //获取所有订单详细对象列表
     List<OrderLine> descriptions = order.getDescriptions();
-    Map<String, BigDecimal> skuMap = new HashMap<>();
+    Map<String, BigDecimal> newSkuIdStockMap = new HashMap<>();
+
+    //    获取 库存商品信息
+    Map<String,BigDecimal> oldSkuIdStockMap =  skuStockMap(descriptions);
+
 
 //    所需要的商品 id 和  数量
     for (OrderLine orderLine: descriptions) {
 //    校验需求商品的id是否为空
       if (StringUtils.isBlank(orderLine.getSkuId()) || orderLine.getQty() == null)
-        return false;
+        return BaseResponse.fail(503,"商品信息错误或未填写！");
 //    需求商品库存是否存在   商品库存是否为空
-      if (skuDao.get(orderLine.getSkuId()) == null || skuDao.get(orderLine.getSkuId()).getStockQty() == null )
-        return false;
-      skuMap.put(skuDao.get(orderLine.getSkuId()).getId(),skuDao.get(orderLine.getSkuId()).getStockQty().add(orderLine.getQty()) );
+      if (!oldSkuIdStockMap.containsKey(orderLine.getSkuId())  ||  oldSkuIdStockMap.get(orderLine.getSkuId()) == null )
+        return BaseResponse.fail(503,"库存商品不足！");
+      newSkuIdStockMap.put(skuDao.get(orderLine.getSkuId()).getId(),skuDao.get(orderLine.getSkuId()).getStockQty().subtract(orderLine.getQty()) );
     }
 
-    if(!skuDao.batchUpdateSkuStock(skuMap))
-      return false;
+//    批量更新库存
+    skuDao.batchUpdateSkuStock(newSkuIdStockMap);
+//    更新状态
+    orderStateUpdate(order.getBillNumber(),Order.STATE.aborted);
+    return BaseResponse.fail(503,"审核成功！");
+  }
 
+  private boolean orderStateUpdate(String str,Order.STATE state) {
     jdbcTemplate.update( new UpdateBuilder()
         .table(POrder.TABLE_NAME)
-        .setValue(POrder.STATE, "aborted")
-        .where(Predicates.equals(POrder.BILLNUMBER, order.getBillNumber()))
+        .setValue(POrder.STATE, state.toString())
+        .where(Predicates.equals(POrder.BILLNUMBER,str))
         .build());
     return true;
   }
+
 
   /**
    * 分页查询
@@ -303,6 +316,8 @@ public class OrderDao {
    * @param pageSize
    * @return
    */
+
+//  借鉴sku query
   public QueryResult<Order> queryAll(int page, int pageSize) {
     SelectStatement select = new SelectBuilder()
         .select(POrder.COLUMNS)
@@ -311,6 +326,24 @@ public class OrderDao {
         .build();
     JdbcPagingQueryExecutor<Order> executor = new JdbcPagingQueryExecutor<Order>(jdbcTemplate, new Order.RowMapper() ); // (1)
     return executor.query(select, page, pageSize); // (2)
+  }
+
+  /**
+   * 条件分页查询
+   * @param filter
+   * @return
+   */
+  public QueryResult<Order> query(OrderFilter filter) {
+    SelectStatement select = new SelectBuilder()
+        .select(POrder.COLUMNS).from(POrder.TABLE_NAME)
+        .build();
+    if (!StringUtils.isBlank(filter.getBillNumber())) {
+      select.where(Predicates.equals(POrder.BILLNUMBER, filter.getBillNumber()));
+    }
+
+
+    JdbcPagingQueryExecutor executor = new JdbcPagingQueryExecutor(jdbcTemplate, POrder::mapRow);
+    return executor.query(select, filter.getPage(), filter.getPageSize());
   }
 
 }

@@ -115,15 +115,15 @@ public class SKUDao {
 
   public QueryResult<SKU> query(SKUFilter filter) {
     SelectStatement select = new SelectBuilder()
-            .select(PSKU.COLUMNS).from(PSKU.TABLE_NAME)
-            .build();
+        .select(PSKU.COLUMNS).from(PSKU.TABLE_NAME)
+        .build();
     if (!StringUtils.isBlank(filter.getSpuidEq())) {
       select.where(Predicates.equals(PSKU.SPUID, filter.getSpuidEq()));
     }
-    if (StringUtils.isBlank(filter.getIdNameLike()) == false) {
+    if (!StringUtils.isBlank(filter.getIdNameLike())) {
       select.where(Predicates.or(
-              Predicates.equals(PSKU.ID, filter.getIdNameLike()),
-              Predicates.equals(PSKU.NAME, filter.getIdNameLike())));
+          Predicates.equals(PSKU.ID, filter.getIdNameLike()),
+          Predicates.equals(PSKU.NAME, filter.getIdNameLike())));
     }
     if (filter.getPriceLessOrEquals() != null) {
       select.where(Predicates.lessOrEquals(PSKU.SPUID, filter.getPriceLessOrEquals()));
@@ -135,6 +135,22 @@ public class SKUDao {
     JdbcPagingQueryExecutor executor = new JdbcPagingQueryExecutor(jdbcTemplate, PSKU::mapRow);
     return executor.query(select, filter.getPage(), filter.getPageSize());
   }
+
+//  根据id 批量获取商品
+  public List<SKU> querySkusById(List<String> skuIds) {
+
+    SelectStatement selectSku = new SelectBuilder()
+        .select(PSKU.COLUMNS)
+        .from(PSKU.TABLE_NAME)
+        .where(Predicates.in(null,PSKU.ID,skuIds.toArray()))
+        .build();
+
+    List<SKU> skus = jdbcTemplate.query(selectSku, PSKU::mapRow);
+
+    return skus;
+  }
+
+
 
   /**
    * 批量更新  商品 库存
@@ -157,6 +173,8 @@ public class SKUDao {
 
     return true;
   }
+
+
 
 
 }

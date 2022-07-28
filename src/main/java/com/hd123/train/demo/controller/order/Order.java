@@ -43,6 +43,13 @@ public class Order {
   @ApiModelProperty(value = "订单明细")
   private List<OrderLine> descriptions = new ArrayList<>();
 
+  public enum STATE {
+    submited,audited,aborted
+  }
+  public enum DELIVERTYPE {
+    selfPick,courier
+  }
+
 
   public static class RowMapper extends PStandardEntity.RowMapper<Order> {
     @Override
